@@ -5,14 +5,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Scan Video Directory",
             "type": "python",
             "request": "launch",
             "program": "touch.py",
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "--scan-path", "F:\\Videos"
+                "--scan-path", "F:\\Videos", "--old", "1970-01-02"
+            ]
+        },
+        {
+            "name": "Scan Example Directory",
+            "type": "python",
+            "request": "launch",
+            "program": "touch.py",
+            "console": "integratedTerminal", 
+            "justMyCode": false,
+            "args": [
+                "--scan-path", "F:\\Vault", "--old", "1970-01-02"
             ]
         }
     ]

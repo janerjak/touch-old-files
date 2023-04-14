@@ -33,9 +33,10 @@ task_group = parser.add_argument_group("task", description="Arguments to specify
 task_group.add_argument("--scan-path", "-i", type=folder_argument, default="./", help="path to the folder which is scanned recursively")
 task_group.add_argument("--old", "-o", type=date_argument, default="1970-01-01", help="files with modification times equal to or older than this argument are touched. Default is date of UNIX time 0. Format: YYYY-mm-dd")
 task_group.add_argument("--update-empty", "-0", action="store_true", help="update times of empty files. Turned off by default.")
+task_group.add_argument("--update-dirs", "-d", type=bool, default=True, help="whether to update times of directories")
 
 io_group = parser.add_argument_group("io", description="Arguments to specify inputs and outputs")
 io_group.add_argument("--silent", "-s", action="store_true", help="disable verbose STDOUT output and print success and error information")
 
 misc_group = parser.add_argument_group("misc", "Miscellaneous arguments")
-misc_group.add_argument("--depth-limit", "-d", type=positive_int_or_none, default=None, help="depth limit for recursive folder scanning. Set this to a positive value if for instance symlinks point to upper level directories")
+misc_group.add_argument("--depth-limit", "-L", type=positive_int_or_none, default=None, help="depth limit for recursive folder scanning. Set this to a positive value if for instance symlinks point to upper level directories")

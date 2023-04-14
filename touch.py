@@ -3,12 +3,13 @@
 from colorama import Fore, Style
 from datetime import datetime
 from filedate import File as FiledateFile
-from os import listdir, path, stat, utime
+from os import listdir, path, stat, sys, utime
 from os import name as osname
 from time import time
 
 from utility.argument_parsers import parser
-from utility.cli import create_spinner, pl, print_while_spinning 
+from utility.cli import create_spinner, pl, print_while_spinning
+from utility.windows import is_safe_regarding_windows_timestamp_bug 
 
 TAB_LENGTH = 2
 
@@ -16,7 +17,9 @@ def get_decorative_print_descent_prefix(level, folder : bool = True):
     decoration_count = ((level * TAB_LENGTH)) + (0 if folder else TAB_LENGTH)
     return f"{'' if folder else '  '}{'-' * decoration_count}{'|' if folder else '-'}"
 
-def get_system_time_as_datetime(system_time):
+def get_system_time_as_datetime(system_time = None):
+    if system_time is None:
+        system_time = time()
     return datetime.fromtimestamp(system_time)
 
 def get_file_time_as_datetime(absolute_file_path, path_get_time_function_name):
@@ -72,7 +75,7 @@ def descent_into_folder(args, absolute_folder_path=None, level=0):
     found_files_count, touched_files_count = 0, 0
     for file_name in level_files:
         absolute_file_path = path.join(absolute_folder_path, file_name)
-        if handle_file(args, file_name, absolute_file_path, level, spinner):
+        if handle_file(args, file_name, absolute_file_path, level, is_file=True, spinner=spinner):
             touched_files_count += 1
         found_files_count += 1
 
@@ -84,6 +87,12 @@ def descent_into_folder(args, absolute_folder_path=None, level=0):
         found_files_count += child_found
         touched_files_count += child_touched
 
+    # Files of this folder is completed. Check for the folder itself now.
+    level_above = max(level - 1, 0)
+    if handle_file(args, folder_name, absolute_folder_path, level_above, is_file=False, spinner=spinner):
+        touched_files_count += 1
+    found_files_count += 1
+
     # This folder is completed, print information
     step_style = Style.DIM if level > 0 else Style.NORMAL
     step_color = Fore.WHITE if level > 0 else Fore.GREEN
@@ -91,9 +100,9 @@ def descent_into_folder(args, absolute_folder_path=None, level=0):
         spinner.succeed(f"{decoration} {folder_name} scanned.\t {step_style}{step_color} Checked: {found_files_count}\t Modified: {touched_files_count}{Style.RESET_ALL}")
     return found_files_count, touched_files_count
 
-def handle_file(args, file_name, absolute_file_path, level, spinner=None):
+def handle_file(args, file_name, absolute_file_path, level, is_file=True, spinner=None):
     current_time_dict = {
-        time_keyword: get_file_time_as_datetime_by_keyword(time_keyword)
+        time_keyword: get_file_time_as_datetime_by_keyword(absolute_file_path, time_keyword)
         for time_keyword in ("created", "modified", "accessed")
     }
     is_time_old_dict = {
@@ -103,18 +112,25 @@ def handle_file(args, file_name, absolute_file_path, level, spinner=None):
 
     file_size = stat(absolute_file_path).st_size
     is_any_time_old = any(is_time_old_dict.values())
-    perform_action = is_any_time_old and (file_size > 0 or args.update_empty)
+    if is_file:
+        perform_action = is_any_time_old and (file_size > 0 or args.update_empty)
+    else:
+        perform_action = is_any_time_old and args.update_dirs
 
     if perform_action:
-        current_unix_time = time()
-        
-        def patch_time(keyword, current_unix_time, current_time_dict, is_time_old_dict):
-            return current_unix_time if is_time_old_dict[keyword] else current_time_dict[keyword]
+        current_system_time = get_system_time_as_datetime()
 
         patched_times = {
-            time_keyword: current_unix_time if is_time_old_dict[time_keyword] else current_unix_time
+            time_keyword: current_system_time if is_time_old_dict[time_keyword] else current_time_dict[time_keyword]
             for time_keyword in current_time_dict
         }
+
+        # Check for Python timestamp() bug on Windows
+        # Reference: https://github.com/python/cpython/issues/94414
+        if sys.platform.startswith("win") and \
+                not is_safe_regarding_windows_timestamp_bug(patched_times.values()):
+            print_file_info(args, level, file_name, perform_action, success=False, reason="skipped as the new file time is not supported by Windows", spinner=spinner)
+            return False
 
         filedate_obj = FiledateFile(absolute_file_path)
         filedate_obj.set(**patched_times)
