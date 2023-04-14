@@ -19,11 +19,18 @@ def get_decorative_print_descent_prefix(level, folder : bool = True):
 def get_system_time_as_datetime(system_time):
     return datetime.fromtimestamp(system_time)
 
-def get_creation_time_as_datetime(absolute_file_path):
-    return get_system_time_as_datetime(path.getctime(absolute_file_path))
+def get_file_time_as_datetime(absolute_file_path, path_get_time_function_name):
+    path_get_time_function = getattr(path, path_get_time_function_name)
+    return get_system_time_as_datetime(path_get_time_function(absolute_file_path))
 
-def get_modification_time_as_datetime(absolute_file_path):
-    return get_system_time_as_datetime(path.getmtime(absolute_file_path))
+def get_file_time_as_datetime_by_keyword(absolute_file_path, time_keyword):
+    # Translate:
+    # - created  -> c
+    # - modified -> m
+    # - accessed -> a
+    keyword_part = time_keyword[0]
+    path_get_time_function_name = f"get{keyword_part}time"
+    return get_file_time_as_datetime(absolute_file_path, path_get_time_function_name)
 
 def is_datetime_time_old(args, time):
     return (time - args.old).days <= 0
@@ -43,6 +50,7 @@ def descent_into_folder(args, absolute_folder_path=None, level=0):
     # absolute_folder_path is allowed to be None iff level is 0
     if (absolute_folder_path is None) != (level == 0):
         raise RuntimeError(f"Call to descent_into_folder() with {absolute_folder_path=}, {level=} not intended.")
+    
     # Use the top level folder, if level is 0
     absolute_folder_path = absolute_folder_path or args.scan_path
     folder_name = path.basename(absolute_folder_path)
@@ -84,30 +92,40 @@ def descent_into_folder(args, absolute_folder_path=None, level=0):
     return found_files_count, touched_files_count
 
 def handle_file(args, file_name, absolute_file_path, level, spinner=None):
-    creation_time, modification_time = get_creation_time_as_datetime(absolute_file_path), get_modification_time_as_datetime(absolute_file_path)
-    creation_old, modification_old = is_datetime_time_old(args, creation_time), is_datetime_time_old(args, modification_time)
+    current_time_dict = {
+        time_keyword: get_file_time_as_datetime_by_keyword(time_keyword)
+        for time_keyword in ("created", "modified", "accessed")
+    }
+    is_time_old_dict = {
+        time_keyword: is_datetime_time_old(args, current_time_dict[time_keyword])
+        for time_keyword in current_time_dict
+    }
+
     file_size = stat(absolute_file_path).st_size
-    action_required = creation_old or modification_old
-    perform_action = action_required and (file_size > 0 or args.update_empty)
+    is_any_time_old = any(is_time_old_dict.values())
+    perform_action = is_any_time_old and (file_size > 0 or args.update_empty)
+
     if perform_action:
         current_unix_time = time()
-    if perform_action:
-        if creation_old:
-            filedate_obj = FiledateFile(absolute_file_path)
-            # TODO: Bug: modified is read eventhough not set. The library seems to be bad. Investigate later.
-            #filedate_obj.set(
-            #    created=current_unix_time
-            #)
-        if modification_old:
-            # We do not want to change the access time. Since utime requires it, we first obtain it and then pass it to utime
-            untouched_access_time = path.getatime(absolute_file_path)
-            utime(absolute_file_path, (untouched_access_time, current_unix_time))
-    if action_required:
+        
+        def patch_time(keyword, current_unix_time, current_time_dict, is_time_old_dict):
+            return current_unix_time if is_time_old_dict[keyword] else current_time_dict[keyword]
+
+        patched_times = {
+            time_keyword: current_unix_time if is_time_old_dict[time_keyword] else current_unix_time
+            for time_keyword in current_time_dict
+        }
+
+        filedate_obj = FiledateFile(absolute_file_path)
+        filedate_obj.set(**patched_times)
+    
+    if is_any_time_old:
         print_file_info(args, level, file_name, perform_action, success=True, reason="skipped as the file is empty", spinner=spinner)
         return True
 
 def main(args):
-    create_spinner().info(f"Scanning for old files (<= {args.old.strftime('%Y-%m-%d')}) in: {args.scan_path}")
+    old_time_str = args.old.strftime('%Y-%m-%d')
+    create_spinner().info(f"Scanning for old files (<= {old_time_str}) in: {args.scan_path}")
     descent_into_folder(args)
 
 if __name__ == "__main__":
